@@ -13,7 +13,21 @@ import {
 import { createRoot } from 'react-dom/client';
 import { 
   ValeurTexte, Reponse, Question, Scene 
-} from '../gereJson'
+} from '../gereJson';
+import { ChangeEvent, useState } from 'react';
+import { Position } from 'rete-area-plugin/_types/types';
+
+class NodeRobote extends Classic.Node<
+  { [key in string]: Classic.Socket },
+  { [key in string]: Classic.Socket },
+  {
+    [key in string]:
+      | TextAreaControl
+      | Classic.Control
+      | Classic.InputControl<"number">
+      | Classic.InputControl<"text">;
+  }
+> {}
 
 type Node = QuestionNode | AnswerNode;
 type Conn =
@@ -22,14 +36,40 @@ type Conn =
 
 type Schemes = GetSchemes<Node, Conn>;
 
-class Connection<A extends Node, B extends Node> extends Classic.Connection<
+class Connection<A extends NodeRobote, B extends NodeRobote> extends Classic.Connection<
   A,
   B
 > {}
 
-class BaseNode extends Classic.Node {
+class TextAreaControl extends Classic.Control {
+  constructor(public valeurs:ValeurTexte){
+    super();
+  }
+}
+
+function CustomTextArea(props : {data : TextAreaControl})
+{
+  const [value, setValue] = useState(props.data.valeurs.intitule);
+
+  const modifValeur = (e:ChangeEvent<HTMLTextAreaElement>) => {
+    props.data.valeurs.intitule = e.target.value;
+    setValue(e.target.value);
+  };
+
+  return (
+    <textarea 
+      className="replique"
+      value={value}
+      onChange={ modifValeur }
+    />
+  );
+}
+
+class BaseNode extends NodeRobote {
   width = 200;
-  height = 350;
+  height = 400;
+
+  public positionInitiale:boolean = false;
 
   constructor(titre:string){
     super(titre);
@@ -37,42 +77,42 @@ class BaseNode extends Classic.Node {
 
   addBaseControls(valeurs:ValeurTexte) : void
   {
-    this.addIntitule(valeurs.intitule);
-    this.addComportement(valeurs.comportement);
-    this.addPolitesse(valeurs.politesse);
-
-    this.addInput("input", new Classic.Input(socket, 'Input', true));
-  }
-
-  addIntitule(initial:string) : void
-  {
+    
+    let controleIntitule = new TextAreaControl(valeurs);
+    controleIntitule.index = 0;
     this.addControl(
       "textIntitule",
-      new Classic.InputControl("text", { initial })
-    );
-  }
+      controleIntitule);
 
-  addComportement(initial:number) : void
-  {
+    let controleComportement = new Classic.InputControl("number", { initial:valeurs.comportement, change(value){
+                                                                                  valeurs.comportement = value}}
+    );
+    controleComportement.index = 1;
     this.addControl(
       "numberComportement",
-      new Classic.InputControl("number", { initial })
+      controleComportement
     );
-  }
 
-  addPolitesse(initial:number) : void
-  {
+    let controlePolitesse = new Classic.InputControl("number", { initial:valeurs.politesse, change(value){
+                                                                              valeurs.politesse = value} });
+    controlePolitesse.index = 2;
     this.addControl(
       "numberPolitesse",
-      new Classic.InputControl("number", { initial })
+      controlePolitesse
     );
+
+    let inputSocket = new Classic.Input(socket, 'Input', true);
+    inputSocket.index = 3;
+    this.addInput("input", inputSocket);
   }
 } 
 
 class QuestionNode extends BaseNode{
   source:Question;
 
-  constructor(src:Question){
+  constructor(src:Question = {index:0, x:0, y:0, nom:"", 
+                              question:{intitule:"", comportement:0,politesse:0},
+                              reponses:[]}){
     super(src.nom);
     
     this.source = src;
@@ -83,7 +123,8 @@ class QuestionNode extends BaseNode{
 class AnswerNode extends BaseNode{
   source:Reponse;
 
-  constructor(src:Reponse){
+  constructor(src:Reponse = {index:0, x:0, y:0, intitule:"", 
+                            comportement:0,politesse:0,suite:""}){
     super("Reponse");
     
     this.source = src;
@@ -111,39 +152,30 @@ export async function createEditor(container: HTMLElement) {
   area.use(connection);
 
   connection.addPreset(ConnectionPresets.classic.setup());
-  reactRender.addPreset(ReactPresets.classic.setup());
-
-  /*const a = new NumberNode(1);
-  const b = new NumberNode(1);
-  const c = new NumberNode(10);
-  const add = new AddNode();
-
-  await editor.addNode(a);
-  await editor.addNode(b);
-  await editor.addNode(c);
-  await editor.addNode(add);
-
-  await editor.addConnection(new Connection(a, 'value', add, 'a'));
-  await editor.addConnection(new Connection(b, 'value', add, 'b'));
-  await editor.addConnection(new Connection(c, 'value', add, 'c'));
-
-  await area.nodeViews.get(a.id)?.translate(100, 100);
-  await area.nodeViews.get(b.id)?.translate(100, 300);
-  await area.nodeViews.get(c.id)?.translate(100, 500);
-  await area.nodeViews.get(add.id)?.translate(400, 150);*/
+  reactRender.addPreset(ReactPresets.classic.setup({
+    customize: {
+      control(data) {
+        if (data.payload instanceof TextAreaControl) {
+          return CustomTextArea;
+        }
+        if (data.payload instanceof Classic.InputControl) {
+          return ReactPresets.classic.Control;
+        }
+        return null;
+      }
+    }
+  }));
 
   return {
     destroy: () => area.destroy(),
   };
 }
 
-var scene:Scene;
 var questionNodes:QuestionNode[];
 var reponseNodes:AnswerNode[];
 
-export async function createSceneNodes(scn:Scene)
+export async function createSceneNodes(scene:Scene)
 {
-  scene = scn;
   questionNodes = [];
   reponseNodes = [];
   scene.questions.forEach(async (question:Question) => {
@@ -151,6 +183,7 @@ export async function createSceneNodes(scn:Scene)
     questionNodes.push(questionNode);
     await editor.addNode(questionNode);
     await area.nodeViews.get(questionNode.id)?.translate(question.x, question.y);
+    questionNode.positionInitiale = true;
   });
 
   scene.reponses.forEach(async (reponse:Reponse) =>{
@@ -158,8 +191,10 @@ export async function createSceneNodes(scn:Scene)
     reponseNodes.push(reponseNode);
     await editor.addNode(reponseNode);
     await area.nodeViews.get(reponseNode.id)?.translate(reponse.x, reponse.y);
+    reponseNode.positionInitiale = true;
   });
   createConnections();
+  createEvents();
 }
 
 async function createConnections()
@@ -167,11 +202,12 @@ async function createConnections()
   questionNodes.forEach(async (questionNode) =>{
     questionNode.source.reponses.forEach(async (indexReponse) =>{
       let reponseNode = trouveUnNodeReponse(indexReponse.indexReponse);
-      let indexOutput = indexReponse.indexLocal.toString();
-      questionNode.addOutput(indexOutput, new Classic.Output(socket, indexOutput));
+      let indexOutput = (indexReponse.indexLocal +1).toString();
+      let outputSocket = new Classic.Output(socket, indexOutput);
+      outputSocket.index = indexReponse.indexLocal + 4;
+      questionNode.addOutput(indexOutput, outputSocket);
       await editor.addConnection(new Connection(questionNode, indexOutput,
                                  reponseNode as Node, 'input'));
-      
     });
   });
   connecteReponses();
@@ -189,9 +225,31 @@ async function connecteReponses()
   });
 }
 
-function trouveUnNodeReponse(index:number)
+function createEvents()
 {
-    let retour = null;
+  area.addPipe(context => {
+    if (context.type === 'nodetranslate')
+      {
+        modifieCoordonneesNode(context.data.id, context.data.position);
+      }
+    return context
+  })
+}
+
+function modifieCoordonneesNode(id:string, pos:Position)
+{
+  let n:Node = editor.getNode(id);
+  if (n.positionInitiale)
+  {
+    n.source.x = pos.x;
+    n.source.y = pos.y;
+  }
+ 
+}
+
+function trouveUnNodeReponse(index:number):AnswerNode
+{
+    let retour:AnswerNode = new AnswerNode();
     for (let i = 0;i<reponseNodes.length;i++)
     {
         let reponse = reponseNodes[i];
@@ -204,9 +262,9 @@ function trouveUnNodeReponse(index:number)
     return retour;
 }
 
-function trouveUnNodeQuestion(nom:string)
+function trouveUnNodeQuestion(nom:string):QuestionNode
 {
-    let retour = null;
+    let retour:QuestionNode = new QuestionNode();
     for (let i = 0;i<questionNodes.length;i++)
     {
         let question = questionNodes[i];

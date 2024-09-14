@@ -1,4 +1,4 @@
-import { ChangeEvent } from "react";
+import { ChangeEvent, MouseEventHandler } from "react";
 import { createSceneNodes } from "./rete/default";
 
 export interface ValeurTexte{
@@ -34,20 +34,33 @@ export interface Scene{
   reponses:Reponse[];
 }
 
-async function handleChange(event:ChangeEvent<HTMLInputElement>) {
+
+var scene:Scene;
+var nomScene:string;
+
+export async function handleChange(event:ChangeEvent<HTMLInputElement>) {
   const reader = new FileReader()
   reader.onload = async (e) => { 
     const result = e.target?.result;
     if (typeof result === "string")
     {
-      let scene:Scene = JSON.parse(result);
+      scene = JSON.parse(result);
       createSceneNodes(scene);
     }
   };
   if (event.target.files)
   {
+    nomScene = event.target.value.substring(12);
     reader.readAsText(event.target.files[0])
   }
 }
 
-export { handleChange }
+export function sauveJson()
+{
+    const file = new Blob([JSON.stringify(scene)], { type: 'text/plain' });
+    const link = document.createElement("a");
+    link.href = URL.createObjectURL(file);
+    link.download = nomScene;
+    link.click();
+    URL.revokeObjectURL(link.href);
+}
