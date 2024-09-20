@@ -276,5 +276,3 @@ function trouveUnNodeQuestion(nom:string):QuestionNode
     }
     return retour;
 }
-
-
